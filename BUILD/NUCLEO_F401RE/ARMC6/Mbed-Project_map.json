@@ -79,12 +79,12 @@
     {
         "module": "main.o",
         "size": {
-            ".text": 1639,
-            ".data": 16,
-            ".bss": 280,
-            ".text-delta": 0,
-            ".data-delta": 0,
-            ".bss-delta": 0
+            ".text": 1719,
+            ".data": 17,
+            ".bss": 304,
+            ".text-delta": 92,
+            ".data-delta": 1,
+            ".bss-delta": 24
         }
     },
     {
@@ -112,10 +112,10 @@
     {
         "module": "mbed-os\\drivers",
         "size": {
-            ".text": 2226,
+            ".text": 2300,
             ".data": 0,
             ".bss": 1780,
-            ".text-delta": 0,
+            ".text-delta": 74,
             ".data-delta": 0,
             ".bss-delta": 0
         }
@@ -177,10 +177,10 @@
     },
     {
         "summary": {
-            "static_ram": 14934,
-            "static_ram_delta": 0,
-            "total_flash": 129776,
-            "total_flash_delta": 0
+            "static_ram": 14959,
+            "static_ram_delta": 25,
+            "total_flash": 129931,
+            "total_flash_delta": 167
         }
     }
 ]

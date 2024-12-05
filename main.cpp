@@ -1,4 +1,3 @@
-
 #include "mbed.h"
 #include "NHD_0216HZ.h"
 #include "platform/mbed_thread.h"
@@ -10,10 +9,10 @@
 #define LOW_PRIORITY    255 // Lowest priority
 
 DigitalOut laser(D6);
-//DigitalOut led(D4);
 PwmOut speaker(D3);	
 
 void shoot();
+void deathFunc();
 void initial_display();
 void update_ammo_display(int ammo);
 
@@ -25,6 +24,7 @@ void trigger_ISR();
 void sensor_ISR();
 Timer debounceTimer;
 Timer burstTimer;
+Timer deathTimer;
 
 
 float gunShot = 1.0f / 200.0f; //4khz
@@ -39,11 +39,12 @@ int ammo = max_ammo;
 int reload_time = 3000;
 
 int burst_time = 2000;
-bool automatic = false;
+bool automatic = true;
 
 bool isShooting = false;
 
 volatile bool triggerPressed = false;
+volatile bool death = false;
 
 
 /*----------------------------------------------------------------------------
@@ -53,10 +54,10 @@ int main() {
 
     laser = 0;
     speaker = 0;     
-    speaker.period(gunShot); //
+    //speaker.period(gunShot); //
 
     trigger.fall(&trigger_ISR); 
-    sensor.fall(&sensor_ISR); 
+    sensor.rise(&sensor_ISR); 
 
     //trigger.set_priority(LOW_PRIORITY);
     initial_display();
@@ -64,6 +65,16 @@ int main() {
     debounceTimer.start();  
 
     while (true) {
+
+        speaker = 0;//
+
+        if(death) {
+            death = false;
+            printf("Death ... \n");
+            speaker = 0.1;     // Turn buzzer on
+            speaker.period(hitMarkerSound); //
+            deathFunc();
+        }
 
         if (triggerPressed) {
             printf("Shooting ... \n");
@@ -75,7 +86,7 @@ int main() {
                         shoot();
                     }
                     ThisThread::sleep_for(10ms);
-                }
+                } 
                 laser = 0;
                 speaker = 0;
                 isShooting = false;
@@ -89,14 +100,19 @@ int main() {
 }
 
 void sensor_ISR() { 
-    speaker = 0.1;     // Turn buzzer on
-    speaker.period(hitMarkerSound); //
+    death = true;
 }
 
 void trigger_ISR() { 
     if (debounceTimer.read_ms() > DEBOUNCE_DELAY.count() && !laser) {
         triggerPressed = true;
         debounceTimer.reset();  // Reset the debounce timer
+    }
+}
+
+void deathFunc() {
+   deathTimer.start();  // Start the burst timer
+    while (debounceTimer.read_ms() < 2000) {
     }
 }
 
@@ -117,12 +133,12 @@ void shoot() {
 
         if(automatic) {
            if (trigger == 1) {  // If trigger is released, stop shooting immediately
-            laser = 0;
-            speaker = 0;
-            burstTimer.stop();  // Stop the burst timer
-            burstTimer.reset(); // Reset the timer
-            isShooting = false;  // Reset the flag
-            return;
+                laser = 0;
+                speaker = 0;
+                burstTimer.stop();  // Stop the burst timer
+                burstTimer.reset(); // Reset the timer
+                isShooting = false;  // Reset the flag
+                return;
            }
         }
     }
