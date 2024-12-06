@@ -27,34 +27,36 @@ void reloadButton_ISR();
 Timer debounceTimer;
 Timer burstTimer;
 
-
 float gunShot = 1.0f / 200.0f; //4khz
 float hitMarkerSound = 1.0f / 500.0f;
 
+//Display
 int Kills = 0;
 char kills_str[20];
 int deaths = 0;
 char deaths_str[20];   
-int max_ammo = 100;
+
+//Ammo And Reloading
+int max_ammo = 500;
 int ammo = max_ammo;
-int reload_time = 3000;
+int reloadTime = 3;
+Ticker reloadTimer;
+void reloadTimer_ISR();
+volatile bool reloading = false;
 
-int burst_time = 2000;
-bool automatic = true;
-
+//shooting
+int burst_time = 4000;
+bool automatic = false;
 bool isShooting = false;
-
 volatile bool triggerPressed = false;
-volatile bool death = false;
 
-bool isRespawning = false; //Check if respaqning
-Ticker respawnTimer;
-
-void timer_ISR();
-
-volatile bool playBuzzer = false;  // Flag to control buzzer in main loop
-
+//Deaths
 int respawnTime = 3;
+bool isRespawning = false; //Check if respaqning
+volatile bool playBuzzer = false;  // Flag to control buzzer in main loop
+volatile bool death = false;
+Ticker respawnTimer;
+void timer_ISR();
 
 /*----------------------------------------------------------------------------
  MAIN function
@@ -113,9 +115,20 @@ int main() {
     }
 }
 
+//ISR for when reload timer stops
+void reloadTimer_ISR() {
+    if (reloading) {
+        ammo = max_ammo;
+        reloading = false;
+        reloadTimer.detach();  //Detach the ticker interrupt
+    }
+}
 
 void reloadButton_ISR() {
-    ammo = max_ammo;
+    if (!reloading) {  // Start reloading only if not already in progress
+        reloading = true;
+        reloadTimer.attach(&reloadTimer_ISR, reloadTime);
+    }
 }
 
 
@@ -155,6 +168,13 @@ void shoot() {
         return;
     }
 
+    // Cancel reload if it was in progress, then shoot
+    if (reloading) {
+        printf("Reloading canceled due to shooting!\n");
+        reloading = false;
+        reloadTimer.detach();  // Stop the reload timer
+    }
+
     isShooting = true;  // flag to indicate shooting in progress
     laser = 1;   
 
@@ -162,6 +182,11 @@ void shoot() {
     
     burstTimer.start();  // Start the burst timer
     while (burstTimer.read_ms() < burst_time && ammo > 0) {
+
+        if(death || reloading) {
+            //reloading = false;
+            break;
+        }
 
         if(automatic) {
            if (trigger == 1 || ammo < 1) {  // If trigger is released, stop shooting immediately
