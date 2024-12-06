@@ -19,10 +19,11 @@ void update_ammo_display(int ammo);
 
 InterruptIn trigger(D4);
 InterruptIn sensor(D7);
-
+InterruptIn reloadButton(D2);
 
 void trigger_ISR();
 void sensor_ISR();
+void reloadButton_ISR();
 Timer debounceTimer;
 Timer burstTimer;
 
@@ -32,14 +33,14 @@ float hitMarkerSound = 1.0f / 500.0f;
 
 int Kills = 0;
 char kills_str[20];
-int deaths = 1;
+int deaths = 0;
 char deaths_str[20];   
-int max_ammo = 15;
+int max_ammo = 100;
 int ammo = max_ammo;
 int reload_time = 3000;
 
 int burst_time = 2000;
-bool automatic = false;
+bool automatic = true;
 
 bool isShooting = false;
 
@@ -66,6 +67,7 @@ int main() {
 
     trigger.fall(&trigger_ISR); 
     sensor.rise(&sensor_ISR); 
+    reloadButton.fall(&reloadButton_ISR); 
 
     initial_display();
 
@@ -77,18 +79,18 @@ int main() {
         if (playBuzzer) {
             speaker = 0.1;  // Activate the buzzer
             //speaker.period(hitMarkerSound);  // Set buzzer to hit sound frequency
-            printf("Total Deaths: %d", deaths);
+            deaths++; //add death
+            printf("Total Deaths: %d \n", deaths);
 
             ThisThread::sleep_for(3000ms);  // Sleep for 1s to let buzzer play
             playBuzzer = false;  // Reset buzzer flag
-            deaths++; //add death
             speaker = 0;
         } else {
             speaker = 0;  // Turn off buzzer
         }
 
+        if (triggerPressed && ammo > 0) {
 
-        if (triggerPressed) {
             printf("Shooting ... \n");
             triggerPressed = false; // Reset flag
 
@@ -104,13 +106,18 @@ int main() {
             } else {
                 shoot();  //Semi-Automatic Or Burst
             }
-
         }
     
 
         ThisThread::sleep_for(10ms); 
     }
 }
+
+
+void reloadButton_ISR() {
+    ammo = max_ammo;
+}
+
 
 //ISR for when respawn timer stops
 void timer_ISR() {
@@ -154,17 +161,25 @@ void shoot() {
     
     
     burstTimer.start();  // Start the burst timer
-    while (burstTimer.read_ms() < burst_time) {
+    while (burstTimer.read_ms() < burst_time && ammo > 0) {
 
         if(automatic) {
-           if (trigger == 1) {  // If trigger is released, stop shooting immediately
+           if (trigger == 1 || ammo < 1) {  // If trigger is released, stop shooting immediately
             laser = 0;
             burstTimer.stop();  // Stop the burst timer
             burstTimer.reset(); // Reset the timer
             isShooting = false;  // Reset the flag
+
             return;
            }
+
+            ammo--;
+            printf("Remaining Ammo: %d \n", ammo);
         }
+
+
+        ammo--;
+        printf("Remaining Ammo: %d \n", ammo);
     }
 
     laser = 0;  // Turn off laser after burst time
@@ -173,13 +188,13 @@ void shoot() {
     burstTimer.reset(); // Reset the timer
 
     // Cooldown after burst
-      if (!automatic) {
+    if (!automatic) {
         ThisThread::sleep_for(1000); // Brief cooldown period
     }
 
     isShooting = false;  // Reset flag to allow next shot
 
-    //ammo--;
+
         
     /*
     update_ammo_display(ammo);
