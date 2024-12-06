@@ -3,66 +3,69 @@
 #include "NHD_0216HZ.h"
 #include "platform/mbed_thread.h"
 #include <iostream>
+#include <string>
 
 #define DEBOUNCE_DELAY 200ms  // Define a debounce delay (200 milliseconds)
 
-#define HIGH_PRIORITY   0   // Highest priority
-#define LOW_PRIORITY    255 // Lowest priority
-
+//Outputs
 DigitalOut laser(D6);
-//DigitalOut led(D4);
 PwmOut speaker(D3);	
 
-void shoot();
+//Display LCD
 void initial_display();
-void update_ammo_display(int ammo);
+void update_display(int value, int size, int x, int y);
 
+//Interrupts
 InterruptIn trigger(D4);
 InterruptIn sensor(D7);
 InterruptIn reloadButton(D2);
+InterruptIn switchShootingMode(D8);
 
-void trigger_ISR();
-void sensor_ISR();
-void reloadButton_ISR();
 Timer debounceTimer;
-Timer burstTimer;
 
+//Sound FX
 float gunShot = 1.0f / 200.0f; //4khz
 float hitMarkerSound = 1.0f / 500.0f;
-
-//Display
-int Kills = 0;
-char kills_str[20];
-int deaths = 0;
-char deaths_str[20];   
 
 //Ammo And Reloading
 int max_ammo = 500;
 int ammo = max_ammo;
-int reloadTime = 3;
+int reloadTime = 7;
+volatile bool reloading = false;
+volatile bool reloadFinished = false;
 Ticker reloadTimer;
 void reloadTimer_ISR();
-volatile bool reloading = false;
+void reloadButton_ISR();
 
-//shooting
+//Shooting
 int burst_time = 4000;
-bool automatic = false;
+bool automatic = true;
 bool isShooting = false;
 volatile bool triggerPressed = false;
+Timer burstTimer;
+void shoot();
+void trigger_ISR();
 
 //Deaths
-int respawnTime = 3;
+int deaths = 0;
+int respawnTime = 5;
 bool isRespawning = false; //Check if respaqning
 volatile bool playBuzzer = false;  // Flag to control buzzer in main loop
-volatile bool death = false;
-Ticker respawnTimer;
-void timer_ISR();
+volatile bool death = false; //if player is dead
+Ticker respawnTimer; //timer for respawn
+void respawnTimer_ISR(); //ISR for respawnTimer
+void sensor_ISR();
+
+//Shooting Mode
+int currentMode = 0;
+string currentMode_str = "A";
+volatile bool switchingModes = false;
+void switchShootingMode_ISR();
 
 /*----------------------------------------------------------------------------
  MAIN function
  *----------------------------------------------------------------------------*/
-int main() {
-
+int main() {    
     laser = 0;
     speaker = 0;     
     speaker.period(gunShot); //
@@ -70,6 +73,7 @@ int main() {
     trigger.fall(&trigger_ISR); 
     sensor.rise(&sensor_ISR); 
     reloadButton.fall(&reloadButton_ISR); 
+    switchShootingMode.rise(&switchShootingMode_ISR);
 
     initial_display();
 
@@ -80,22 +84,24 @@ int main() {
         //play buzzer when dying and increment death count
         if (playBuzzer) {
             speaker = 0.1;  // Activate the buzzer
-            //speaker.period(hitMarkerSound);  // Set buzzer to hit sound frequency
             deaths++; //add death
             printf("Total Deaths: %d \n", deaths);
+            update_display(deaths, 4, 3, 1); //Display to LCD
 
-            ThisThread::sleep_for(3000ms);  // Sleep for 1s to let buzzer play
+            ThisThread::sleep_for(3000ms);  // Sleep for 3s to let buzzer play and respawn
             playBuzzer = false;  // Reset buzzer flag
             speaker = 0;
         } else {
             speaker = 0;  // Turn off buzzer
         }
 
+        //When Trigger Button is pressed
         if (triggerPressed && ammo > 0) {
 
             printf("Shooting ... \n");
             triggerPressed = false; // Reset flag
 
+            //If Automatic Shooting
            if (automatic) {
                 while (trigger == 0) { // While trigger is pressed
                     if (!isShooting) {
@@ -105,35 +111,95 @@ int main() {
                 }
                 laser = 0;
                 isShooting = false;
-            } else {
+            } 
+            //Burst Shooting
+            else {
                 shoot();  //Semi-Automatic Or Burst
             }
         }
-    
+
+        //Disaply new ammo count
+        if(reloadFinished) {
+            reloadFinished = false;
+            
+            update_display(ammo, 4, 6, 1);
+            printf("Finished Reloading ---\n");
+        }
+
+        //Display current shooting mode
+        if(switchingModes == true) {
+            switchingModes = false;
+            printf("Switching Mode: %d \n", currentMode);
+            set_cursor(15, 1);
+            print_lcd(currentMode_str); // Display the new ammo value
+        }
 
         ThisThread::sleep_for(10ms); 
     }
 }
 
+/*----------------------------------------------------------------------------*/
+//Change Mode From automatic, semi, burst and adjust reload time.
+void switchShootingMode_ISR() {
+
+    if (debounceTimer.read_ms() > DEBOUNCE_DELAY.count()) {
+
+        currentMode++;        
+
+        if(currentMode == 3) {
+            currentMode = 0;
+        }
+
+        switchingModes = true;
+
+        if(currentMode == 0) {
+            automatic = true;
+            currentMode_str = "A";
+            reloadTime = 7;
+            max_ammo = 500;
+        }
+        if(currentMode == 1) {
+            automatic = false;
+            burst_time = 1000;
+            currentMode_str = "S";
+            reloadTime = 2;
+            max_ammo = 300;
+            ammo = max_ammo;
+        }
+        if(currentMode == 2) {
+            automatic = false;
+            burst_time = 3000;
+            currentMode_str = "B";
+            reloadTime = 5;
+            max_ammo = 400;
+        }
+
+        debounceTimer.reset(); 
+    }
+}
+/*----------------------------------------------------------------------------*/
 //ISR for when reload timer stops
 void reloadTimer_ISR() {
     if (reloading) {
-        ammo = max_ammo;
+        ammo = max_ammo; //give max ammo
         reloading = false;
+        reloadFinished = true;
         reloadTimer.detach();  //Detach the ticker interrupt
     }
 }
 
+/*----------------------------------------------------------------------------*/
+//ISR for when reload button is pressed
 void reloadButton_ISR() {
     if (!reloading) {  // Start reloading only if not already in progress
         reloading = true;
-        reloadTimer.attach(&reloadTimer_ISR, reloadTime);
+        reloadTimer.attach(&reloadTimer_ISR, reloadTime); //Start timer
     }
 }
 
-
+/*----------------------------------------------------------------------------*/
 //ISR for when respawn timer stops
-void timer_ISR() {
+void respawnTimer_ISR() {
     if (death) {
         death = false;  // Reset death flag
         isRespawning = false;  // Reset respawning flag
@@ -141,7 +207,8 @@ void timer_ISR() {
     }
 }
 
-//For reciever
+/*----------------------------------------------------------------------------*/
+//ISR For reciever. (when getting shot)
 void sensor_ISR() {
     //Add death and respawn
     if (!isRespawning) { 
@@ -150,11 +217,11 @@ void sensor_ISR() {
         isRespawning = true; 
         playBuzzer = true; 
 
-        respawnTimer.attach(&timer_ISR, respawnTime);
+        respawnTimer.attach(&respawnTimer_ISR, respawnTime);
     }
 }
 
-
+/*----------------------------------------------------------------------------*/
 void trigger_ISR() { 
     if (debounceTimer.read_ms() > DEBOUNCE_DELAY.count() && !laser) {
         triggerPressed = true;
@@ -162,9 +229,11 @@ void trigger_ISR() {
     }
 }
 
+/*----------------------------------------------------------------------------*/
+//Shooting Function that also handles ammo count.
 void shoot() {
+    // If already shooting, don't trigger another shot
     if (isShooting) {
-        // If already shooting, don't trigger another shot
         return;
     }
 
@@ -173,14 +242,14 @@ void shoot() {
         printf("Reloading canceled due to shooting!\n");
         reloading = false;
         reloadTimer.detach();  // Stop the reload timer
+        return;
     }
 
     isShooting = true;  // flag to indicate shooting in progress
     laser = 1;   
-
-    
     
     burstTimer.start();  // Start the burst timer
+    //Burst shot
     while (burstTimer.read_ms() < burst_time && ammo > 0) {
 
         if(death || reloading) {
@@ -188,6 +257,7 @@ void shoot() {
             break;
         }
 
+        //For automatic, keep shooting bursts rapidly
         if(automatic) {
            if (trigger == 1 || ammo < 1) {  // If trigger is released, stop shooting immediately
             laser = 0;
@@ -200,11 +270,13 @@ void shoot() {
 
             ammo--;
             printf("Remaining Ammo: %d \n", ammo);
+            update_display(ammo, 4, 6, 1);
         }
 
 
         ammo--;
         printf("Remaining Ammo: %d \n", ammo);
+        update_display(ammo, 4, 6, 1);
     }
 
     laser = 0;  // Turn off laser after burst time
@@ -218,97 +290,28 @@ void shoot() {
     }
 
     isShooting = false;  // Reset flag to allow next shot
-
-
-        
-    /*
-    update_ammo_display(ammo);
-
-        if(ammo == 0) {
-            speaker = 0;
-            laser = 0;
-            //printf("reloading ...");
-            //ThisThread::sleep_for(reload_time);
-            ammo = max_ammo;
-            update_ammo_display(ammo);
-        }
-
-        //printf("Intruder detected!\n");
-    } else {
-        //led = 0;        // Turn LED off
-        speaker = 0;     // Turn buzzer off
-        laser = 0;
-    }
-*/
-    //ThisThread::sleep_for(100);
 }
 
-void update_ammo_display(int ammo) {
+/*----------------------------------------------------------------------------*/
+//Update LCD Display Stats
+void update_display(int value, int size, int x, int y) {
     // Clear previous ammo value
-    set_cursor(6, 1); 
+    set_cursor(x, y); 
     print_lcd("   "); 
 
     // Display the new ammo value
-    char ammo_str[4]; // (0-999)
-    sprintf(ammo_str, "%d", ammo);  // Convert ammo to string
-    set_cursor(6, 1);
-    print_lcd(ammo_str); // Display the new ammo value
+    char value_str[size]; // 4 = (0-999)
+    sprintf(value_str, "%d", value);  // Convert ammo to string
+    set_cursor(x, y);
+    print_lcd(value_str); // Display the new ammo value
 }
 
-
-/*
-
-void shoot() {
-
-    if (trigger == 0) {
-        laser = 1;
-
-        speaker = 0.1;     // Turn buzzer on
-        speaker.period(minPeriod); //
-
-        Kills++;
-        sprintf(kills_str, "%d", Kills);  // Convert integer to string
-        set_cursor(0, 1);         // Move to the second row
-        print_lcd(kills_str); 
-
-        ammo--;
-        update_ammo_display(ammo);
-
-        if(ammo == 0) {
-            speaker = 0;
-            laser = 0;
-            //printf("reloading ...");
-            //ThisThread::sleep_for(reload_time);
-            ammo = max_ammo;
-            update_ammo_display(ammo);
-        }
-
-        //printf("Intruder detected!\n");
-    } else {
-        //led = 0;        // Turn LED off
-        speaker = 0;     // Turn buzzer off
-        laser = 0;
-    }
-
-    //ThisThread::sleep_for(100);
-}
-
-void update_ammo_display(int ammo) {
-    // Clear previous ammo value
-    set_cursor(6, 1); 
-    print_lcd("   "); 
-
-    // Display the new ammo value
-    char ammo_str[4]; // (0-999)
-    sprintf(ammo_str, "%d", ammo);  // Convert ammo to string
-    set_cursor(6, 1);
-    print_lcd(ammo_str); // Display the new ammo value
-}
-*/
-
+/*----------------------------------------------------------------------------*/
+//Initial LCD Display
 void initial_display() {
     init_spi();
     init_lcd();
+
     // Kills
     set_cursor(0, 0); 
     print_lcd("K");
@@ -328,8 +331,16 @@ void initial_display() {
     print_lcd("Ammo"); 
 
     set_cursor(6, 1);         
-    update_ammo_display(max_ammo);
-    
+    update_display(max_ammo, 4, 6, 1);   
+
+    //Shooting Mode
+    set_cursor(15, 0);  
+    print_lcd("M"); 
+
+    set_cursor(15, 1);         
+    print_lcd("A");   
+
+    /*
      //Red Team
     set_cursor(11, 0);
     print_lcd("R");
@@ -343,4 +354,5 @@ void initial_display() {
 
     set_cursor(14, 1);  
     print_lcd("0");
+    */
 }
