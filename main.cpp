@@ -139,7 +139,7 @@ void trigger_ISR() {
 /*----------------------------------------------------------------------------*/
 // ISR for sensor hit (death logic)
 void sensor_ISR() {
-    // Check if enough time has passed since the last hit (debounce logic)
+
     if (sensorDebounceTimer.read_ms() > 200) {  // 200ms debounce period
         sensorHit = true;  // Set the flag to indicate the sensor was hit
         sensorDebounceTimer.reset();  // Reset the debounce timer
@@ -207,7 +207,7 @@ void update_ammo_display(int ammo) {
 /*----------------------------------------------------------------------------*/
 // Initial display setup
 void initial_display() {
-    printf("Game Start\n"); // Replace with LCD initialization logic
+    printf("Game Start\n"); 
     printf("Health: OK\n"); // Health status
     update_ammo_display(max_ammo);
 }
@@ -217,7 +217,7 @@ void initial_display() {
 void test_laser() {
     printf("Activating laser and speaker...\n");
     laser = 1;      // Turn on the laser
-    speaker = 0.1;  // Activate speaker at low power
+    speaker = 0.1; 
     ThisThread::sleep_for(500ms); // Keep active for 500 ms
     laser = 0;      // Turn off the laser
     speaker = 0;    // Turn off the speaker
